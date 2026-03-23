@@ -1,0 +1,46 @@
+version: 0.1
+runson: linux
+
+# ──────────────────────────────────────────────
+# HyperExecute – Test Run Artefact Downloader
+# Downloads screenshots & videos for every
+# session inside a given HyEx Job ID.
+# ──────────────────────────────────────────────
+
+env:
+  # Inject these as CI secrets / pipeline variables
+  LT_USERNAME: ${LT_USERNAME}
+  LT_ACCESS_KEY: ${LT_ACCESS_KEY}
+  HYEX_JOB_ID: ${HYEX_JOB_ID}          # The HyperExecute Job ID for this run
+  ARTIFACT_DIR: artifacts               # Local output folder name
+
+pre:
+  - echo "==> Installing dependencies"
+  - pip install requests --quiet || true
+  - mkdir -p ${ARTIFACT_DIR}/screenshots ${ARTIFACT_DIR}/videos
+
+# ── Main download script ───────────────────────
+testSuites:
+  - name: download-artefacts
+    command: python3 download_artifacts.py
+    env:
+      LT_USERNAME: ${LT_USERNAME}
+      LT_ACCESS_KEY: ${LT_ACCESS_KEY}
+      HYEX_JOB_ID: ${HYEX_JOB_ID}
+      ARTIFACT_DIR: ${ARTIFACT_DIR}
+
+# ── Upload the downloaded folder as a pipeline artefact ──
+artefacts:
+  upload:
+    - name: test-run-artefacts
+      path:
+        - ${ARTIFACT_DIR}/
+      expiresIn: 7d          # Retain for 7 days; adjust as needed
+
+# Optional: post step to zip everything for easier download
+post:
+  - |
+    echo "==> Compressing artefacts"
+    zip -r test-run-artefacts.zip ${ARTIFACT_DIR}/
+    echo "Done. Artefact bundle: test-run-artefacts.zip"
+  - echo "==> Sessions processed successfully"
