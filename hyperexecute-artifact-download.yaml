@@ -1,46 +1,67 @@
-version: 0.1
-runson: linux
+stages:
+  - trigger
+  - download
 
-# ──────────────────────────────────────────────
-# HyperExecute – Test Run Artefact Downloader
-# Downloads screenshots & videos for every
-# session inside a given HyEx Job ID.
-# ──────────────────────────────────────────────
+variables:
+  CONCURRENCY:    "1"
+  BUILD_TITLE:    "GitLab_Pipeline_Run"
+  POLL_INTERVAL:  "15"
+  POLL_TIMEOUT:   "3600"
 
-env:
-  # Inject these as CI secrets / pipeline variables
-  LT_USERNAME: ${LT_USERNAME}
-  LT_ACCESS_KEY: ${LT_ACCESS_KEY}
-  HYEX_JOB_ID: ${HYEX_JOB_ID}          # The HyperExecute Job ID for this run
-  ARTIFACT_DIR: artifacts               # Local output folder name
+# ── Stage 1: Trigger test run instantly, wait 1 hour, then download artifacts ─
+trigger_and_download:
+  stage: trigger
+  image: python:3.11-slim
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq curl zip
+    - pip install requests --quiet
+  script:
+    # ── Step 1: Fire the curl trigger immediately ──────────────────────────────
+    - echo "==> Triggering test run ${TEST_RUN_ID}"
+    - |
+      TRIGGER_RESPONSE=$(curl --silent --fail --location \
+        'https://test-manager-api.lambdatest.com/api/atm/v1/hyperexecute' \
+        --header 'Content-Type: application/json' \
+        --header "Authorization: Basic ${LT_AUTH_TOKEN}" \
+        --data "{
+          \"test_run_id\": \"${TEST_RUN_ID}\",
+          \"concurrency\": ${CONCURRENCY},
+          \"title\": \"${BUILD_TITLE}\",
+          \"console_log\": false,
+          \"network_logs\": false,
+          \"network_full_har\": false,
+          \"retry_on_failure\": true,
+          \"max_retries\": 1,
+          \"accessibility\": false
+        }")
+      echo "==> Trigger response: ${TRIGGER_RESPONSE}"
 
-pre:
-  - echo "==> Installing dependencies"
-  - pip install requests --quiet || true
-  - mkdir -p ${ARTIFACT_DIR}/screenshots ${ARTIFACT_DIR}/videos
+    # ── Step 2: Wait 1 hour before downloading ────────────────────────────────
+    - echo "==> Waiting 1 hour before downloading artifacts..."
+    - sleep 3600
+    - echo "==> 1 hour wait complete, starting artifact download"
 
-# ── Main download script ───────────────────────
-testSuites:
-  - name: download-artefacts
-    command: python3 download_artifacts.py
-    env:
-      LT_USERNAME: ${LT_USERNAME}
-      LT_ACCESS_KEY: ${LT_ACCESS_KEY}
-      HYEX_JOB_ID: ${HYEX_JOB_ID}
-      ARTIFACT_DIR: ${ARTIFACT_DIR}
+    # ── Step 3: Download artifacts using the trigger response ─────────────────
+    - |
+      echo "${TRIGGER_RESPONSE}" \
+      | LT_USERNAME=${LT_USERNAME} \
+        LT_ACCESS_KEY=${LT_ACCESS_KEY} \
+        POLL_INTERVAL=${POLL_INTERVAL} \
+        POLL_TIMEOUT=${POLL_TIMEOUT} \
+        python3 hyperexecute_artifacts.py
+    - echo "==> Download complete"
 
-# ── Upload the downloaded folder as a pipeline artefact ──
-artefacts:
-  upload:
-    - name: test-run-artefacts
-      path:
-        - ${ARTIFACT_DIR}/
-      expiresIn: 7d          # Retain for 7 days; adjust as needed
-
-# Optional: post step to zip everything for easier download
-post:
-  - |
-    echo "==> Compressing artefacts"
-    zip -r test-run-artefacts.zip ${ARTIFACT_DIR}/
-    echo "Done. Artefact bundle: test-run-artefacts.zip"
-  - echo "==> Sessions processed successfully"
+  after_script:
+    - |
+      JOB_DIR=$(ls -d */ 2>/dev/null | grep -E '^[0-9a-f-]{36}/$' | head -1 | tr -d '/')
+      if [ -n "${JOB_DIR}" ]; then
+        zip -r "${JOB_DIR}.zip" "${JOB_DIR}/"
+        echo "==> Bundle ready: ${JOB_DIR}.zip"
+      fi
+  artifacts:
+    name: "hyperexecute-artifacts-${CI_PIPELINE_ID}"
+    paths:
+      - "*.zip"
+      - "**/artifact_summary.json"
+    expire_in: 7 days
+    when: always
