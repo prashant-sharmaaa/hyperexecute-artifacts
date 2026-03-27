@@ -13,6 +13,7 @@ Flow:
   3. Fetch all sessions for the job
   4. For each session, fetch session detail (contains all artifact URLs)
   5. Download video, screenshots, and logs
+  6. Download job-level HTML report
 
 Session type routing (auto-detected from test ID prefix):
   RMAA-AND-*  →  Real Device Android  →  mobile-api.lambdatest.com
@@ -21,6 +22,7 @@ Session type routing (auto-detected from test ID prefix):
 
 Output folder:
   {JOB_ID}/
+  ├── report.html
   ├── session_001_<test_id>/
   │   ├── video.mp4
   │   ├── screenshots.zip
@@ -351,6 +353,41 @@ def download_session_artifacts(test_id: str, detail: dict, out_dir: Path) -> dic
     return summary
 
 
+# ── Job-level HTML report ─────────────────────────────────────────────────────
+def download_job_report(job_id: str, base_dir: Path) -> bool:
+    """
+    GET https://api-hyperexecute.lambdatest.com/logistics/v1.0/report/{job_id}/download?type=default
+    Response: {"data": "<signed-url-to-report.html>", "status": "success"}
+    Downloads the HTML report into {base_dir}/report.html
+    """
+    print("\n[Report] Fetching job report ...")
+    url  = f"https://api-hyperexecute.lambdatest.com/logistics/v1.0/report/{job_id}/download?type=default"
+    resp = get(url)
+
+    if not resp:
+        print(f"  [WARN] No response from report API.")
+        return False
+
+    signed_url = resp.get("data") if isinstance(resp, dict) else None
+    if not signed_url or not isinstance(signed_url, str):
+        print(f"  [WARN] Signed URL not found in report response.")
+        print(f"         Response: {resp}")
+        return False
+
+    print(f"  Downloading report HTML ...")
+    dest = base_dir / "report.html"
+    try:
+        # Signed URL — no auth header needed
+        with requests.get(signed_url, timeout=60) as r:
+            r.raise_for_status()
+            dest.write_bytes(r.content)
+        print(f"  ✓ Report saved → {dest.name} ({dest.stat().st_size/1024:.1f} KB)")
+        return True
+    except Exception as e:
+        print(f"  ✗ Report download failed: {e}")
+        return False
+
+
 # ── Summary report ────────────────────────────────────────────────────────────
 def write_summary(base_dir: Path, job_id: str, results: list):
     out = base_dir / "artifact_summary.json"
@@ -421,6 +458,9 @@ def main():
             "downloaded" : dl_summary["downloaded"],
             "skipped"    : dl_summary["skipped"],
         })
+
+    # Download job-level HTML report
+    download_job_report(job_id, base_dir)
 
     write_summary(base_dir, job_id, results)
 
