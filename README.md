@@ -29,20 +29,12 @@ Downloads video, screenshots, and logs for every session in a HyperExecute job. 
 ## Output Structure
 
 ```
-{JOB_UUID}/
+{JOB_ID}/
+├── report.html                  ← new — job-level HTML report
 ├── session_001_<test_id>/
 │   ├── video.mp4
 │   ├── screenshots.zip
-│   ├── selenium.log       ← Web sessions
-│   ├── console.log
-│   ├── network.log
-│   └── command.log
-├── session_002_<test_id>/
-│   ├── video.mp4
-│   ├── screenshots.zip
-│   ├── appium.log         ← Real Device sessions (RMAA)
-│   ├── device.log
-│   └── crash.log
+│   └── ...logs
 └── artifact_summary.json
 ```
 
